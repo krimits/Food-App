@@ -1,0 +1,118 @@
+[
+  {
+    "StoreName": "Burger House",
+    "Latitude": 37.9838,
+    "Longitude": 23.7275,
+    "FoodCategory": "burger",
+    "Stars": 4,
+    "NoOfVotes": 3,
+    "StoreLogo": "",
+    "Products": [
+      {
+        "ProductName": "classic burger",
+        "ProductType": "burger",
+        "AvailableAmount": 250,
+        "Price": 7.5
+      },
+      {
+        "ProductName": "bacon cheeseburger",
+        "ProductType": "burger",
+        "AvailableAmount": 100,
+        "Price": 9
+      },
+      {
+        "ProductName": "fries",
+        "ProductType": "side",
+        "AvailableAmount": 300,
+        "Price": 3
+      }
+    ]
+  },
+  {
+    "StoreName": "Sushi Zen",
+    "Latitude": 37.975,
+    "Longitude": 23.735,
+    "FoodCategory": "sushi",
+    "Stars": 5,
+    "NoOfVotes": 42,
+    "StoreLogo": "",
+    "Products": [
+      {
+        "ProductName": "salmon roll",
+        "ProductType": "sushi",
+        "AvailableAmount": 200,
+        "Price": 10
+      },
+      {
+        "ProductName": "tuna nigiri",
+        "ProductType": "sushi",
+        "AvailableAmount": 150,
+        "Price": 11.5
+      },
+      {
+        "ProductName": "edamame",
+        "ProductType": "starter",
+        "AvailableAmount": 90,
+        "Price": 4
+      }
+    ]
+  },
+  {
+    "StoreName": "Healthy Bites",
+    "Latitude": 37.9801,
+    "Longitude": 23.7285,
+    "FoodCategory": "healthy",
+    "Stars": 4,
+    "NoOfVotes": 65,
+    "StoreLogo": "",
+    "Products": [
+      {
+        "ProductName": "quinoa salad",
+        "ProductType": "salad",
+        "AvailableAmount": 120,
+        "Price": 6.5
+      },
+      {
+        "ProductName": "avocado toast",
+        "ProductType": "toast",
+        "AvailableAmount": 80,
+        "Price": 5.5
+      },
+      {
+        "ProductName": "green smoothie",
+        "ProductType": "drink",
+        "AvailableAmount": 100,
+        "Price": 4.2
+      }
+    ]
+  },
+  {
+    "StoreName": "Street Gyros",
+    "Latitude": 37.991,
+    "Longitude": 23.7301,
+    "FoodCategory": "greek",
+    "Stars": 5,
+    "NoOfVotes": 110,
+    "StoreLogo": "",
+    "Products": [
+      {
+        "ProductName": "pork gyros",
+        "ProductType": "gyros",
+        "AvailableAmount": 300,
+        "Price": 4.8
+      },
+      {
+        "ProductName": "chicken gyros",
+        "ProductType": "gyros",
+        "AvailableAmount": 250,
+        "Price": 4.6
+      },
+      {
+        "ProductName": "tzatziki",
+        "ProductType": "sauce",
+        "AvailableAmount": 150,
+        "Price": 1.5
+      }
+    ]
+  }
+]

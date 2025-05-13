@@ -1,0 +1,31 @@
+[
+  {
+    "StoreName": "pizza hut",
+    "Latitude": 37.9932963,
+    "Longitude": 23.733413,
+    "FoodCategory": "pizzeria",
+    "Stars": 5,
+    "NoOfVotes": 2,
+    "StoreLogo": "",
+    "Products": [
+      {
+        "ProductName": "margarita",
+        "ProductType": "pizza",
+        "AvailableAmount": 5000,
+        "Price": 9.2
+      },
+      {
+        "ProductName": "special",
+        "ProductType": "pizza",
+        "AvailableAmount": 1000,
+        "Price": 12
+      },
+      {
+        "ProductName": "chef’s Salad",
+        "ProductType": "salad",
+        "AvailableAmount": 100,
+        "Price": 5
+      }
+    ]
+  }
+]
