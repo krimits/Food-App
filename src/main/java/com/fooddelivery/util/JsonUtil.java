@@ -112,4 +112,86 @@ public class JsonUtil {
         sb.append("}");
         return sb.toString();
     }
+
+    public static String createSearchStoresRequestJson(double lat, double lon, String foodCategory, int minStars, String priceRange) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"clientLatitude\":").append(lat).append(",");
+        sb.append("\"clientLongitude\":").append(lon);
+        if (foodCategory != null && !foodCategory.isEmpty()) {
+            sb.append(",\"foodCategoryFilter\":\"").append(escapeJsonString(foodCategory)).append("\"");
+        }
+        if (minStars > 0) { // Assuming 0 means not specified
+            sb.append(",\"minStarsFilter\":").append(minStars);
+        }
+        if (priceRange != null && !priceRange.isEmpty()) {
+            sb.append(",\"priceRangeFilter\":\"").append(escapeJsonString(priceRange)).append("\"");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    // For SearchStoresResponsePayload (used by Worker and Master)
+    public static String createSearchStoresResponseJson(List<com.fooddelivery.communication.payloads.StoreInfoForClient> results) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"results\":[");
+        if (results != null) {
+            for (int i = 0; i < results.size(); i++) {
+                com.fooddelivery.communication.payloads.StoreInfoForClient store = results.get(i);
+                // Manually construct JSON for each StoreInfoForClient
+                sb.append("{");
+                sb.append("\"storeName\":\"").append(escapeJsonString(store.getStoreName())).append("\",");
+                sb.append("\"foodCategory\":\"").append(escapeJsonString(store.getFoodCategory())).append("\",");
+                sb.append("\"stars\":").append(store.getStars()).append(",");
+                sb.append("\"priceCategory\":\"").append(escapeJsonString(store.getPriceCategory())).append("\",");
+                sb.append("\"distanceKm\":").append(String.format("%.2f", store.getDistanceKm())).append(","); // Format distance
+                sb.append("\"storeLogoPath\":\"").append(escapeJsonString(store.getStoreLogoPath())).append("\",");
+                sb.append("\"latitude\":").append(store.getLatitude()).append(",");
+                sb.append("\"longitude\":").append(store.getLongitude());
+                sb.append("}");
+                if (i < results.size() - 1) {
+                    sb.append(",");
+                }
+            }
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    public static String createRateStoreRequestJson(String storeName, int stars) {
+        // {"storeName":"MyStore","stars":5}
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        // storeName is also sent as routing key, but including in payload for completeness/validation
+        sb.append("\"storeName\":\"").append(escapeJsonString(storeName)).append("\",");
+        sb.append("\"stars\":").append(stars);
+        sb.append("}");
+        return sb.toString();
+    }
+
+    public static String createMapTaskRequestJson(String taskTypeIdentifier, String targetCriteria) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"taskTypeIdentifier\":\"").append(escapeJsonString(taskTypeIdentifier)).append("\",");
+        sb.append("\"targetCriteria\":\"").append(escapeJsonString(targetCriteria)).append("\"");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    // To create JSON for MapTaskResponsePayload (sent by Worker)
+    public static String createMapTaskResponseJson(List<com.fooddelivery.communication.payloads.SalesDataEntry> results) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"mappedResults\":[");
+        if (results != null) {
+            for (int i = 0; i < results.size(); i++) {
+                // Assuming SalesDataEntry.toString() produces a valid JSON object string
+                sb.append(results.get(i).toString()); 
+                if (i < results.size() - 1) {
+                    sb.append(",");
+                }
+            }
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
 }

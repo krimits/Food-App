@@ -137,6 +137,63 @@ public class MasterRequestHandler implements Runnable {
                     // Payload from Master might be empty or contain other filters not yet used by worker.
                     responseJson = worker.getSalesByProductForStore(requestStoreName);
                     break;
+                
+                case SEARCH_STORES_REQUEST:
+                    // No routingKey (storeName) expected from Master for SEARCH, payload has all info
+                    try {
+                        com.fooddelivery.communication.payloads.SearchStoresRequestPayload searchRequest = 
+                            com.fooddelivery.client.android.network.ClientJsonParser.parseSearchStoresRequest(payload);
+                        responseJson = worker.handleWorkerSearchStoresRequest(searchRequest);
+                    } catch (StoreJsonParser.JsonParseException e) { // Assuming JsonParseException is in StoreJsonParser
+                        System.err.println("Worker (" + worker.getPort() + "): Failed to parse SearchStoresRequestPayload: " + e.getMessage());
+                        // Send back an empty valid SearchStoresResponsePayload as JSON
+                        responseJson = JsonUtil.createSearchStoresResponseJson(new java.util.ArrayList<>());
+                    }
+                    break;
+
+                case RATE_STORE_REQUEST:
+                    if (requestStoreName == null) { // requestStoreName is the routingKey from first line
+                        responseJson = JsonUtil.createStatusResponseJson(null, "FAILURE", "Store name (routing key) missing for rate store request.");
+                        break;
+                    }
+                    try {
+                        // Use ClientJsonParser or StoreJsonParser as appropriate for where the method was added
+                        RateStoreRequestPayload rateRequest = com.fooddelivery.client.android.network.ClientJsonParser.parseRateStoreRequestPayload(payload);
+                        // Pass the storeName from routing key, as payload's storeName might be null/optional from parser
+                        responseJson = worker.handleWorkerRateStoreRequest(requestStoreName, rateRequest.getStars());
+                    } catch (StoreJsonParser.JsonParseException e) {
+                        System.err.println("Worker (" + worker.getPort() + "): Failed to parse RateStoreRequestPayload: " + e.getMessage());
+                        responseJson = JsonUtil.createStatusResponseJson(requestStoreName, "FAILURE", "Worker: RateStoreRequestParseException: " + e.getMessage());
+                    }
+                    break;
+
+                case WORKER_MAP_SALES_PRODUCT_CATEGORY_TASK_REQUEST:
+                    try {
+                        MapTaskRequestPayload mapRequest = ClientJsonParser.parseMapTaskRequestPayload(payload);
+                        if (!"PRODUCT_CATEGORY_SALES".equals(mapRequest.getTaskTypeIdentifier())) {
+                             throw new StoreJsonParser.JsonParseException("Invalid taskTypeIdentifier for product category sales map.");
+                        }
+                        List<SalesDataEntry> mappedEntries = worker.executeMapSalesByProductCategoryTask(mapRequest.getTargetCriteria());
+                        responseJson = JsonUtil.createMapTaskResponseJson(mappedEntries);
+                    } catch (StoreJsonParser.JsonParseException e) {
+                        System.err.println("Worker (" + worker.getPort() + "): Failed to parse MapTaskRequestPayload for product category sales: " + e.getMessage());
+                        responseJson = JsonUtil.createMapTaskResponseJson(new ArrayList<>()); // Respond with empty results on error
+                    }
+                    break;
+
+                case WORKER_MAP_SALES_STORE_TYPE_TASK_REQUEST:
+                    try {
+                        MapTaskRequestPayload mapRequest = ClientJsonParser.parseMapTaskRequestPayload(payload);
+                         if (!"STORE_TYPE_SALES".equals(mapRequest.getTaskTypeIdentifier())) { // Ensure correct task type
+                             throw new StoreJsonParser.JsonParseException("Invalid taskTypeIdentifier for store type sales map.");
+                        }
+                        List<SalesDataEntry> mappedEntries = worker.executeMapSalesByStoreTypeTask(mapRequest.getTargetCriteria());
+                        responseJson = JsonUtil.createMapTaskResponseJson(mappedEntries);
+                    } catch (StoreJsonParser.JsonParseException e) {
+                        System.err.println("Worker (" + worker.getPort() + "): Failed to parse MapTaskRequestPayload for store type sales: " + e.getMessage());
+                        responseJson = JsonUtil.createMapTaskResponseJson(new ArrayList<>());
+                    }
+                    break;
 
                 default:
                     System.err.println("Worker (" + worker.getPort() + "): Unsupported message type from Master: " + type);

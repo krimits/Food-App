@@ -89,6 +89,26 @@ public class ClientHandler implements Runnable {
                     // For now, Master just needs storeName for routing.
                     master.handleGetSalesByProductRequest(type, routingKey, payload, out);
                     break;
+                case SEARCH_STORES_REQUEST:
+                    // RoutingKey (e.g. client location string) might be null or not used by Master yet.
+                    // Payload contains client's lat/lon and filters.
+                    master.handleSearchStoresRequest(type, routingKey, payload, out);
+                    break;
+                case RATE_STORE_REQUEST:
+                    if (routingKey == null || routingKey.trim().isEmpty()) {
+                        out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", type + " requires a storeName as routing key."));
+                        return;
+                    }
+                    master.handleRateStoreRequest(type, routingKey, payload, out);
+                    break;
+                case GET_SALES_BY_STORE_TYPE_REQUEST:
+                    if (routingKey == null || routingKey.trim().isEmpty()) {
+                        out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", type + " requires a foodCategory as routing key."));
+                        return;
+                    }
+                    // payload might be empty or contain additional filters in future
+                    master.handleGetSalesByStoreTypeRequest(type, routingKey, payload, out); // routingKey is the foodCategory
+                    break;
                 default:
                     System.err.println("Unsupported message type: " + type);
                     out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Unsupported message type by Master."));
