@@ -175,6 +175,235 @@ public class Master {
         String firstLineToWorker = requestType.name() + ":" + storeName;
         forwardRequestToWorker(selectedWorker, firstLineToWorker, jsonPayload, clientOut, storeName);
     }
+
+    public void handleSearchStoresRequest(MessageType requestType, String routingKey, String jsonPayload, PrintWriter clientOut) {
+        if (workerNodes.isEmpty()) {
+            clientOut.println(JsonUtil.createSearchStoresResponseJson(new ArrayList<>())); // Send empty valid response
+            return;
+        }
+
+        System.out.println("Master: Broadcasting " + requestType + " to all workers. Payload: " + jsonPayload);
+        List<com.fooddelivery.communication.payloads.StoreInfoForClient> aggregatedResults = Collections.synchronizedList(new ArrayList<>());
+        // Use a CountDownLatch to wait for all workers to respond or timeout
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(workerNodes.size());
+
+        for (WorkerInfo workerInfo : workerNodes) {
+            // Create a new thread or use an executor for each worker communication to do them in parallel
+            // For simplicity here, doing it sequentially, but parallel is better.
+            // A proper implementation would use a thread pool for these scatter-gather operations.
+            
+            // This simplified sequential version is for brevity in this subtask:
+            try (Socket workerSocket = new Socket(workerInfo.getHost(), workerInfo.getPort());
+                 PrintWriter workerOut = new PrintWriter(workerSocket.getOutputStream(), true);
+                 BufferedReader workerIn = new BufferedReader(new InputStreamReader(workerSocket.getInputStream()))) {
+                
+                workerSocket.setSoTimeout(5000); // Shorter timeout for search queries to individual workers
+
+                // Worker expects: MessageType (no routing key needed here as it's broadcast), Payload
+                workerOut.println(requestType.name()); 
+                workerOut.println(jsonPayload);
+
+                String workerResponseJson = workerIn.readLine();
+                if (workerResponseJson != null) {
+                    try {
+                        // Master needs to parse worker's SearchStoresResponsePayload
+                        com.fooddelivery.communication.payloads.SearchStoresResponsePayload workerResponse = 
+                            com.fooddelivery.client.android.network.ClientJsonParser.parseSearchStoresResponse(workerResponseJson);
+                        if (workerResponse != null && workerResponse.getResults() != null) {
+                            aggregatedResults.addAll(workerResponse.getResults());
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Master: Error parsing response from worker " + workerInfo.getId() + ": " + e.getMessage());
+                    }
+                }
+            } catch (IOException e) {
+                System.err.println("Master: Error communicating with worker " + workerInfo.getId() + " for search: " + e.getMessage());
+            } finally {
+                latch.countDown(); // Decrement latch regardless of success/failure for this worker
+            }
+        }
+        
+        // This part would ideally be after latch.await() if using parallel calls.
+        // For sequential, it's just after the loop.
+        System.out.println("Master: Aggregated " + aggregatedResults.size() + " search results from workers.");
+        clientOut.println(JsonUtil.createSearchStoresResponseJson(aggregatedResults));
+    }
+    
+    public void handleGetSalesByProductCategoryRequest(MessageType clientRequestType, String productTypeFromClient, String clientJsonPayload, PrintWriter clientOut) {
+        if (productTypeFromClient == null || productTypeFromClient.trim().isEmpty()) {
+            clientOut.println(JsonUtil.createSalesResponseJson("SALES_BY_PRODUCT_CATEGORY", productTypeFromClient, new ArrayList<>(), 0));
+            return;
+        }
+        if (workerNodes.isEmpty()) {
+            clientOut.println(JsonUtil.createSalesResponseJson("SALES_BY_PRODUCT_CATEGORY", productTypeFromClient, new ArrayList<>(), 0));
+            return;
+        }
+
+        System.out.println("Master: Starting MapReduce for " + clientRequestType + " on ProductType: " + productTypeFromClient);
+        final List<SalesDataEntry> collectedWorkerResults = Collections.synchronizedList(new ArrayList<>());
+        final CountDownLatch latch = new CountDownLatch(workerNodes.size());
+        
+        String mapTaskPayloadJson = JsonUtil.createMapTaskRequestJson("PRODUCT_CATEGORY_SALES", productTypeFromClient);
+
+        for (final WorkerInfo workerInfo : workerNodes) {
+            workerTaskExecutorService.submit(() -> {
+                try (Socket workerSocket = new Socket(workerInfo.getHost(), workerInfo.getPort());
+                     PrintWriter workerOut = new PrintWriter(workerSocket.getOutputStream(), true);
+                     BufferedReader workerIn = new BufferedReader(new InputStreamReader(workerSocket.getInputStream()))) {
+                    
+                    workerSocket.setSoTimeout(10000);
+                    // Send WORKER_MAP_SALES_PRODUCT_CATEGORY_TASK_REQUEST to worker
+                    workerOut.println(MessageType.WORKER_MAP_SALES_PRODUCT_CATEGORY_TASK_REQUEST.name());
+                    workerOut.println(mapTaskPayloadJson);
+                    System.out.println("Master: Sent MAP_SALES_PRODUCT_CATEGORY task for '" + productTypeFromClient + "' to worker " + workerInfo.getId());
+
+                    String workerResponseJson = workerIn.readLine();
+                    if (workerResponseJson != null) {
+                        try {
+                            MapTaskResponsePayload workerResponse = ClientJsonParser.parseMapTaskResponsePayload(workerResponseJson);
+                            if (workerResponse != null && workerResponse.getMappedResults() != null) {
+                                collectedWorkerResults.addAll(workerResponse.getMappedResults());
+                            }
+                        } catch (Exception e) {
+                            System.err.println("Master: Error parsing MapTaskResponse from worker " + workerInfo.getId() + " for product category sales: " + e.getMessage());
+                        }
+                    }
+                } catch (IOException e) {
+                    System.err.println("Master: Error communicating with worker " + workerInfo.getId() + " for product category sales task: " + e.getMessage());
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        try {
+            latch.await(15, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            System.err.println("Master: Interrupted while waiting for product category sales map tasks.");
+            Thread.currentThread().interrupt();
+        }
+
+        // Reduce Step (in Master)
+        Map<String, Double> salesByStoreName = new HashMap<>();
+        double grandTotalRevenue = 0;
+        for (SalesDataEntry entry : collectedWorkerResults) {
+            // entry.getItemName() is storeName, entry.getTotalRevenue() is sum for that store for the target productType
+            salesByStoreName.put(entry.getItemName(), 
+                                 salesByStoreName.getOrDefault(entry.getItemName(), 0.0) + entry.getTotalRevenue());
+        }
+        
+        List<SalesDataEntry> finalReducedEntries = new ArrayList<>();
+        for(Map.Entry<String, Double> reducedEntry : salesByStoreName.entrySet()){
+            finalReducedEntries.add(new SalesDataEntry(reducedEntry.getKey(), 0, reducedEntry.getValue())); // quantity 0 as it's per store
+            grandTotalRevenue += reducedEntry.getValue();
+        }
+        
+        System.out.println("Master: Finished MapReduce for " + clientRequestType + ". ProductType: " + productTypeFromClient + ", Results: " + finalReducedEntries.size() + " stores, Grand Total: " + grandTotalRevenue);
+        clientOut.println(JsonUtil.createSalesResponseJson(
+            "SALES_BY_PRODUCT_CATEGORY", 
+            productTypeFromClient, 
+            finalReducedEntries, 
+            grandTotalRevenue
+        ));
+    }
+
+    public void handleGetSalesByStoreTypeRequest(MessageType clientRequestType, String foodCategoryFromClient, String clientJsonPayload, PrintWriter clientOut) {
+        if (foodCategoryFromClient == null || foodCategoryFromClient.trim().isEmpty()) {
+            clientOut.println(JsonUtil.createSalesResponseJson("SALES_BY_STORE_TYPE", foodCategoryFromClient, new ArrayList<>(), 0));
+            return;
+        }
+        if (workerNodes.isEmpty()) {
+            clientOut.println(JsonUtil.createSalesResponseJson("SALES_BY_STORE_TYPE", foodCategoryFromClient, new ArrayList<>(), 0));
+            return;
+        }
+
+        System.out.println("Master: Starting MapReduce for " + clientRequestType + " on FoodCategory: " + foodCategoryFromClient);
+        final List<SalesDataEntry> collectedWorkerResults = Collections.synchronizedList(new ArrayList<>());
+        final CountDownLatch latch = new CountDownLatch(workerNodes.size());
+        
+        // Use "STORE_TYPE_SALES" as the identifier for this specific map task
+        String mapTaskPayloadJson = JsonUtil.createMapTaskRequestJson("STORE_TYPE_SALES", foodCategoryFromClient);
+
+        for (final WorkerInfo workerInfo : workerNodes) {
+            workerTaskExecutorService.submit(() -> {
+                try (Socket workerSocket = new Socket(workerInfo.getHost(), workerInfo.getPort());
+                     PrintWriter workerOut = new PrintWriter(workerSocket.getOutputStream(), true);
+                     BufferedReader workerIn = new BufferedReader(new InputStreamReader(workerSocket.getInputStream()))) {
+                    
+                    workerSocket.setSoTimeout(10000);
+                    // Send WORKER_MAP_SALES_STORE_TYPE_TASK_REQUEST to worker
+                    workerOut.println(MessageType.WORKER_MAP_SALES_STORE_TYPE_TASK_REQUEST.name());
+                    workerOut.println(mapTaskPayloadJson);
+                    System.out.println("Master: Sent MAP_SALES_STORE_TYPE task for '" + foodCategoryFromClient + "' to worker " + workerInfo.getId());
+
+                    String workerResponseJson = workerIn.readLine();
+                    if (workerResponseJson != null) {
+                        try {
+                            MapTaskResponsePayload workerResponse = ClientJsonParser.parseMapTaskResponsePayload(workerResponseJson);
+                            if (workerResponse != null && workerResponse.getMappedResults() != null) {
+                                collectedWorkerResults.addAll(workerResponse.getMappedResults());
+                            }
+                        } catch (Exception e) {
+                            System.err.println("Master: Error parsing MapTaskResponse from worker " + workerInfo.getId() + " for store type sales: " + e.getMessage());
+                        }
+                    }
+                } catch (IOException e) {
+                    System.err.println("Master: Error communicating with worker " + workerInfo.getId() + " for store type sales task: " + e.getMessage());
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        try {
+            latch.await(15, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            System.err.println("Master: Interrupted while waiting for store type sales map tasks.");
+            Thread.currentThread().interrupt();
+        }
+
+        // Reduce Step (in Master)
+        Map<String, Double> salesByStoreName = new HashMap<>();
+        double grandTotalRevenue = 0;
+
+        // Each SalesDataEntry from worker contains (StoreName, TotalRevenueOfThatStoreIfMatchingCategory)
+        for (SalesDataEntry entry : collectedWorkerResults) {
+            salesByStoreName.put(entry.getItemName(), 
+                                 salesByStoreName.getOrDefault(entry.getItemName(), 0.0) + entry.getTotalRevenue());
+        }
+        
+        List<SalesDataEntry> finalReducedEntries = new ArrayList<>();
+        for(Map.Entry<String, Double> reducedEntry : salesByStoreName.entrySet()){
+            finalReducedEntries.add(new SalesDataEntry(reducedEntry.getKey(), 0, reducedEntry.getValue()));
+            grandTotalRevenue += reducedEntry.getValue();
+        }
+        
+        System.out.println("Master: Finished MapReduce for " + clientRequestType + ". FoodCategory: " + foodCategoryFromClient + ", Results: " + finalReducedEntries.size() + " stores, Grand Total: " + grandTotalRevenue);
+        clientOut.println(JsonUtil.createSalesResponseJson(
+            "SALES_BY_STORE_TYPE", 
+            foodCategoryFromClient, 
+            finalReducedEntries, 
+            grandTotalRevenue
+        ));
+    }
+
+    public void handleRateStoreRequest(MessageType requestType, String storeName, String jsonPayload, PrintWriter clientOut) {
+        if (storeName == null || storeName.trim().isEmpty()) {
+            clientOut.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "StoreName is required for " + requestType));
+            return;
+        }
+        if (workerNodes.isEmpty()) {
+            clientOut.println(JsonUtil.createStatusResponseJson(storeName, "FAILURE", "No workers available for rating store."));
+            return;
+        }
+
+        int workerIndex = Math.abs(storeName.hashCode()) % workerNodes.size();
+        WorkerInfo selectedWorker = workerNodes.get(workerIndex);
+        System.out.println("Master: Selected worker " + selectedWorker.getId() + " for " + requestType + " for store " + storeName);
+
+        String firstLineToWorker = requestType.name() + ":" + storeName;
+        forwardRequestToWorker(selectedWorker, firstLineToWorker, jsonPayload, clientOut, storeName);
+    }
     
     // Helper method to forward request to worker and relay response
     // Takes the full firstLine string to send to worker

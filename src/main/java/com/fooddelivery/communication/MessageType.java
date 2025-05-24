@@ -37,5 +37,11 @@ public enum MessageType {
     MAP_TASK_REQUEST,
     MAP_TASK_RESPONSE,
     REDUCE_TASK_REQUEST, // If needed directly, or master does reduce
-    REDUCE_TASK_RESPONSE // If needed
+    REDUCE_TASK_RESPONSE, // If needed
+
+    // ... (existing types)
+    WORKER_MAP_SALES_PRODUCT_CATEGORY_TASK_REQUEST, // Master to Worker
+    WORKER_MAP_SALES_PRODUCT_CATEGORY_TASK_RESPONSE, // Worker to Master (though a generic MapTaskResponse might be better)
+    WORKER_MAP_SALES_STORE_TYPE_TASK_REQUEST,     // For later use
+    WORKER_MAP_SALES_STORE_TYPE_TASK_RESPONSE      // For later use
 }

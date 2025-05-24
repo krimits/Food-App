@@ -207,6 +207,134 @@ public class Worker {
         );
     }
 
+    public synchronized String handleWorkerSearchStoresRequest(com.fooddelivery.communication.payloads.SearchStoresRequestPayload requestPayload) {
+        List<com.fooddelivery.communication.payloads.StoreInfoForClient> matchingStores = new ArrayList<>();
+        Map<String, Store> currentLocalStores = getAllStores(); // Gets a copy
+
+        com.fooddelivery.model.Coordinates clientCoords = new com.fooddelivery.model.Coordinates(requestPayload.getClientLatitude(), requestPayload.getClientLongitude());
+
+        for (Store store : currentLocalStores.values()) {
+            // Initial assumption: store is available unless specific checks fail
+            
+            // 1. Distance Filter (Max 5km)
+            com.fooddelivery.model.Coordinates storeCoords = new com.fooddelivery.model.Coordinates(store.getLatitude(), store.getLongitude());
+            double distance = storeCoords.distanceTo(clientCoords);
+            if (distance > 5.0) { 
+                // System.out.println("Worker ("+getPort()+"): Store " + store.getStoreName() + " filtered out by distance: " + distance + "km");
+                continue; 
+            }
+
+            // 2. Food Category Filter
+            if (requestPayload.getFoodCategoryFilter() != null && !requestPayload.getFoodCategoryFilter().isEmpty()) {
+                if (!store.getFoodCategory().equalsIgnoreCase(requestPayload.getFoodCategoryFilter())) {
+                    // System.out.println("Worker ("+getPort()+"): Store " + store.getStoreName() + " filtered out by food category.");
+                    continue;
+                }
+            }
+
+            // 3. Stars Filter
+            if (requestPayload.getMinStarsFilter() > 0) { 
+                if (store.getStars() < requestPayload.getMinStarsFilter()) {
+                    // System.out.println("Worker ("+getPort()+"): Store " + store.getStoreName() + " filtered out by stars.");
+                    continue;
+                }
+            }
+
+            // 4. Price Category Filter
+            if (requestPayload.getPriceRangeFilter() != null && !requestPayload.getPriceRangeFilter().isEmpty()) {
+                if (store.getPriceCategory() == null || !store.getPriceCategory().equals(requestPayload.getPriceRangeFilter())) {
+                    // System.out.println("Worker ("+getPort()+"): Store " + store.getStoreName() + " filtered out by price category.");
+                    continue;
+                }
+            }
+            
+            // If all filters pass, add to results
+            com.fooddelivery.communication.payloads.StoreInfoForClient storeInfo = new com.fooddelivery.communication.payloads.StoreInfoForClient(
+                store.getStoreName(),
+                store.getFoodCategory(),
+                store.getStars(),
+                store.getPriceCategory(),
+                distance, 
+                store.getStoreLogoPath(),
+                store.getLatitude(),
+                store.getLongitude()
+            );
+            matchingStores.add(storeInfo);
+        }
+        System.out.println("Worker ("+getPort()+"): Found " + matchingStores.size() + " stores matching search criteria. Returning to Master.");
+        return JsonUtil.createSearchStoresResponseJson(matchingStores);
+    }
+
+    public synchronized String handleWorkerRateStoreRequest(String storeName, int stars) {
+        Store store = localStores.get(storeName);
+        if (store == null) {
+            return JsonUtil.createStatusResponseJson(storeName, "FAILURE", "Store not found by worker for rating.");
+        }
+
+        if (stars < 1 || stars > 5) {
+            // This validation should ideally also be in RateStoreRequestPayload or ClientJsonParser for early client feedback
+            return JsonUtil.createStatusResponseJson(storeName, "FAILURE", "Invalid star rating. Must be between 1 and 5.");
+        }
+
+        int currentVotes = store.getNoOfVotes();
+        // Store.stars is int, representing current average.
+        double currentAvgStars = store.getStars(); 
+        
+        // Calculate new average. (currentAvg * currentVotes + newRating) / (newTotalVotes)
+        double newAverageStars = ((currentAvgStars * currentVotes) + stars) / (double)(currentVotes + 1);
+        
+        store.setStars((int) Math.round(newAverageStars)); // Round to nearest int for storage
+        store.setNoOfVotes(currentVotes + 1);
+
+        System.out.println("Worker (" + getPort() + "): Rated store " + storeName + " with " + stars + 
+                           " stars. New avg: " + store.getStars() + ", Total votes: " + store.getNoOfVotes());
+        return JsonUtil.createStatusResponseJson(storeName, "SUCCESS", "Store rated successfully. New average: " + store.getStars() + ", Total votes: " + store.getNoOfVotes());
+    }
+
+    public synchronized List<SalesDataEntry> executeMapSalesByProductCategoryTask(String targetProductType) {
+        List<SalesDataEntry> workerResults = new ArrayList<>();
+        System.out.println("Worker (" + port + "): Starting MAP_SALES_BY_PRODUCT_CATEGORY_TASK for type: " + targetProductType);
+
+        for (Store store : localStores.values()) {
+            double revenueForStoreForProductType = 0;
+            Map<String, Integer> salesByProdQty = store.getSalesByProduct(); // productName -> quantitySold
+
+            for (Map.Entry<String, Integer> saleEntry : salesByProdQty.entrySet()) {
+                String productName = saleEntry.getKey();
+                int quantitySold = saleEntry.getValue();
+                Product product = store.findProduct(productName);
+
+                if (product != null && product.getProductType().equalsIgnoreCase(targetProductType)) {
+                    // Using current price. For historical accuracy, price at time of sale is needed.
+                    revenueForStoreForProductType += product.getPrice() * quantitySold;
+                }
+            }
+
+            if (revenueForStoreForProductType > 0) {
+                // For this task, itemName in SalesDataEntry will be the storeName
+                // totalQuantity can be a placeholder (e.g., 0 or 1) as we sum revenue.
+                workerResults.add(new SalesDataEntry(store.getStoreName(), 0, revenueForStoreForProductType));
+            }
+        }
+        System.out.println("Worker (" + port + "): Finished MAP_SALES_BY_PRODUCT_CATEGORY_TASK. Emitting " + workerResults.size() + " store entries.");
+        return workerResults;
+    }
+
+    public synchronized List<SalesDataEntry> executeMapSalesByStoreTypeTask(String targetFoodCategory) {
+        List<SalesDataEntry> workerResults = new ArrayList<>();
+        System.out.println("Worker (" + port + "): Starting MAP_SALES_BY_STORE_TYPE_TASK for FoodCategory: " + targetFoodCategory);
+
+        for (Store store : localStores.values()) {
+            if (store.getFoodCategory().equalsIgnoreCase(targetFoodCategory)) {
+                // For this task, itemName in SalesDataEntry will be the storeName.
+                // totalQuantity can be a placeholder. totalRevenue is the store's overall total revenue.
+                workerResults.add(new SalesDataEntry(store.getStoreName(), 0, store.getTotalRevenue()));
+            }
+        }
+        System.out.println("Worker (" + port + "): Finished MAP_SALES_BY_STORE_TYPE_TASK. Emitting " + workerResults.size() + " store entries for food category '" + targetFoodCategory + "'.");
+        return workerResults;
+    }
+
     public static void main(String[] args) {
         if (args.length < 1) { System.err.println("Usage: java com.fooddelivery.server.Worker <port>"); System.exit(1); }
         try {
