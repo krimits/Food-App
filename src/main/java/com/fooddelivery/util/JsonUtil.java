@@ -38,4 +38,78 @@ public class JsonUtil {
         // Basic escaping for quotes and backslashes. Not comprehensive.
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
+
+    public static String createAddProductRequestJson(String productName, String productType, double price, int initialAvailableAmount) {
+        // {"productName":"pepsi","productType":"drink","price":1.5,"initialAvailableAmount":100}
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"productName\":\"").append(escapeJsonString(productName)).append("\",");
+        sb.append("\"productType\":\"").append(escapeJsonString(productType)).append("\",");
+        sb.append("\"price\":").append(price).append(",");
+        sb.append("\"initialAvailableAmount\":").append(initialAvailableAmount);
+        sb.append("}");
+        return sb.toString();
+    }
+
+    public static String createRemoveProductRequestJson(String productName) {
+        // {"productName":"coke"}
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"productName\":\"").append(escapeJsonString(productName)).append("\"");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    public static String createUpdateStockRequestJson(String productName, int quantityChange) {
+        // {"productName":"fanta","quantityChange":20}
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"productName\":\"").append(escapeJsonString(productName)).append("\",");
+        sb.append("\"quantityChange\":").append(quantityChange);
+        sb.append("}");
+        return sb.toString();
+    }
+
+    public static String createSalesResponseJson(String queryType, String queryContext, List<com.fooddelivery.communication.payloads.SalesDataEntry> entries, double grandTotal) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"queryType\":\"").append(escapeJsonString(queryType)).append("\",");
+        sb.append("\"queryContext\":\"").append(escapeJsonString(queryContext)).append("\",");
+        sb.append("\"grandTotalRevenue\":").append(grandTotal).append(",");
+        sb.append("\"entries\":[");
+        for (int i = 0; i < entries.size(); i++) {
+            // SalesDataEntry.toString() is designed to produce a JSON object string.
+            // This assumes SalesDataEntry.toString() correctly escapes its internal values.
+            sb.append(entries.get(i).toString());
+            if (i < entries.size() - 1) {
+                sb.append(",");
+            }
+        }
+        sb.append("]");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    public static String createSalesRequestJson(String storeName, String foodCategory, String productType) {
+        // Creates a JSON payload for SalesRequestPayload based on which field is present.
+        // Example: {"storeName":"MyStore"} or {"foodCategory":"pizza"}
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        boolean firstField = true;
+        if (storeName != null) {
+            sb.append("\"storeName\":\"").append(escapeJsonString(storeName)).append("\"");
+            firstField = false;
+        }
+        if (foodCategory != null) {
+            if (!firstField) sb.append(",");
+            sb.append("\"foodCategory\":\"").append(escapeJsonString(foodCategory)).append("\"");
+            firstField = false;
+        }
+        if (productType != null) {
+            if (!firstField) sb.append(",");
+            sb.append("\"productType\":\"").append(escapeJsonString(productType)).append("\"");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
 }
