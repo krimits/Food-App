@@ -138,4 +138,32 @@ public class StoreJsonParser {
             super(message, cause);
         }
     }
+
+    // New methods for parsing product management payloads
+    public static com.fooddelivery.communication.payloads.AddProductRequestPayload parseAddProductRequestPayload(String json) throws JsonParseException {
+        if (json == null || json.trim().isEmpty()) throw new JsonParseException("AddProductRequestPayload JSON is null or empty.");
+        String productName = extractStringValue(json, "productName");
+        String productType = extractStringValue(json, "productType"); // Can be null if not found by extractStringValue
+        double price = extractDoubleValue(json, "price");
+        int initialAvailableAmount = extractIntValue(json, "initialAvailableAmount");
+
+        if (productName == null) throw new JsonParseException("productName missing in AddProductRequestPayload.");
+        // storeName will be passed separately to worker methods.
+        return new com.fooddelivery.communication.payloads.AddProductRequestPayload(null, productName, productType, price, initialAvailableAmount);
+    }
+
+    public static com.fooddelivery.communication.payloads.RemoveProductRequestPayload parseRemoveProductRequestPayload(String json) throws JsonParseException {
+        if (json == null || json.trim().isEmpty()) throw new JsonParseException("RemoveProductRequestPayload JSON is null or empty.");
+        String productName = extractStringValue(json, "productName");
+        if (productName == null) throw new JsonParseException("productName missing in RemoveProductRequestPayload.");
+        return new com.fooddelivery.communication.payloads.RemoveProductRequestPayload(null, productName);
+    }
+
+    public static com.fooddelivery.communication.payloads.UpdateStockRequestPayload parseUpdateStockRequestPayload(String json) throws JsonParseException {
+        if (json == null || json.trim().isEmpty()) throw new JsonParseException("UpdateStockRequestPayload JSON is null or empty.");
+        String productName = extractStringValue(json, "productName");
+        int quantityChange = extractIntValue(json, "quantityChange");
+        if (productName == null) throw new JsonParseException("productName missing in UpdateStockRequestPayload.");
+        return new com.fooddelivery.communication.payloads.UpdateStockRequestPayload(null, productName, quantityChange);
+    }
 }

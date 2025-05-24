@@ -2,7 +2,7 @@ package com.fooddelivery.server;
 
 import com.fooddelivery.communication.Message;
 import com.fooddelivery.communication.MessageType;
-import com.fooddelivery.util.JsonUtil; // Using our basic JsonUtil
+import com.fooddelivery.util.JsonUtil;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -32,27 +32,26 @@ public class ClientHandler implements Runnable {
     @Override
     public void run() {
         try {
-            // Set a timeout for reading operations to prevent thread hanging indefinitely
             clientSocket.setSoTimeout(30000); // 30 seconds timeout for reads
 
-            String inputLine;
-            // Assume client sends one line: MessageType (e.g. ADD_STORE_REQUEST)
-            // And the next line is the JSON payload.
-            // This is a simplified protocol for now.
-            // A more robust way would be to send serialized Message objects or length-prefixed JSON.
-            
-            String messageTypeStr = in.readLine();
-            if (messageTypeStr == null) {
-                System.out.println("Client disconnected before sending message type: " + clientSocket.getRemoteSocketAddress());
+            String firstLine = in.readLine();
+            if (firstLine == null) {
+                System.out.println("Client disconnected before sending any data: " + clientSocket.getRemoteSocketAddress());
                 return;
             }
 
+            String[] parts = firstLine.trim().split(":", 2);
             MessageType type;
+            String routingKey = null; // e.g., storeName for product management
+
             try {
-                type = MessageType.valueOf(messageTypeStr.trim().toUpperCase());
+                type = MessageType.valueOf(parts[0].toUpperCase());
+                if (parts.length > 1) {
+                    routingKey = parts[1];
+                }
             } catch (IllegalArgumentException e) {
-                System.err.println("Received invalid message type from client: " + messageTypeStr);
-                out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Invalid message type"));
+                System.err.println("Received invalid message type format from client: " + firstLine);
+                out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Invalid message type format. Expected TYPE or TYPE:ROUTING_KEY."));
                 return;
             }
             
@@ -62,24 +61,42 @@ public class ClientHandler implements Runnable {
                  return;
             }
 
-            System.out.println("ClientHandler: Received Message Type: " + type);
-            // System.out.println("ClientHandler: Received Payload: " + payload); // Potentially large
-
-            Message clientMessage = new Message(type, payload);
-
-            switch (clientMessage.getType()) {
+            System.out.println("ClientHandler: Received Type: " + type + (routingKey != null ? ", RoutingKey: " + routingKey : ""));
+            
+            // Pass routingKey to master handlers if needed
+            switch (type) {
                 case ADD_STORE_REQUEST:
-                    master.handleAddStoreRequest(clientMessage, out);
+                    // ADD_STORE_REQUEST's payload (store JSON) contains StoreName, so routingKey from first line is not strictly needed here
+                    // but JsonUtil.extractStoreName will be used by master.handleAddStoreRequest
+                    master.handleAddStoreRequest(new Message(type, payload), out);
                     break;
-                // Other cases for different message types will be added here
+                case ADD_PRODUCT_REQUEST:
+                case REMOVE_PRODUCT_REQUEST:
+                case UPDATE_STOCK_REQUEST:
+                    if (routingKey == null || routingKey.trim().isEmpty()) {
+                        out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", type + " requires a storeName as routing key in the format TYPE:storeName."));
+                        return;
+                    }
+                    master.handleProductManagementRequest(type, routingKey, payload, out);
+                    break;
+                case GET_SALES_BY_PRODUCT_REQUEST:
+                    // Expects routingKey (storeName) to be provided in the first line TYPE:ROUTING_KEY
+                    if (routingKey == null || routingKey.trim().isEmpty()) {
+                        out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", type + " requires a storeName as routing key."));
+                        return;
+                    }
+                    // Payload for this specific request might be empty or contain other filters not yet used.
+                    // For now, Master just needs storeName for routing.
+                    master.handleGetSalesByProductRequest(type, routingKey, payload, out);
+                    break;
                 default:
-                    System.err.println("Unsupported message type: " + clientMessage.getType());
-                    out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Unsupported message type"));
+                    System.err.println("Unsupported message type: " + type);
+                    out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Unsupported message type by Master."));
             }
 
         } catch (SocketTimeoutException e) {
             System.err.println("ClientHandler: Socket read timeout: " + e.getMessage());
-            out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Request timeout"));
+            if (out != null && !clientSocket.isClosed()) out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Request timeout"));
         } catch (IOException e) {
             if (!clientSocket.isClosed()) {
                  System.err.println("ClientHandler: IOException: " + e.getMessage());
@@ -89,8 +106,8 @@ public class ClientHandler implements Runnable {
         } catch (Exception e) {
             System.err.println("ClientHandler: Unexpected error: " + e.getMessage());
             e.printStackTrace();
-            if (!clientSocket.isClosed() && out != null) {
-                 out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Internal server error"));
+            if (out != null && !clientSocket.isClosed()) {
+                 out.println(JsonUtil.createStatusResponseJson(null, "FAILURE", "Internal server error in Master."));
             }
         }
         finally {
@@ -103,9 +120,8 @@ public class ClientHandler implements Runnable {
             if (in != null) in.close();
             if (out != null) out.close();
             if (clientSocket != null && !clientSocket.isClosed()) clientSocket.close();
-            System.out.println("ClientHandler: Connection closed with " + (clientSocket != null ? clientSocket.getRemoteSocketAddress() : "client"));
         } catch (IOException e) {
-            System.err.println("ClientHandler: Error closing resources: " + e.getMessage());
+            // System.err.println("ClientHandler: Error closing resources: " + e.getMessage());
         }
     }
 }
